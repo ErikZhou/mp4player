@@ -5,13 +5,13 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QPushButton, QFileDialog, QV
                              QSlider, QLabel, QComboBox, QMainWindow, QAction, QStyle, QMessageBox)
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtCore import Qt, QUrl, QTime
+from PyQt5.QtCore import Qt, QUrl, QTime, QTimer
 from PyQt5.QtGui import QKeyEvent, QIcon
 
 class VideoPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MP4 Player")
+        self.setWindowTitle("Media Player")
         self.setGeometry(100, 100, 800, 600)
 
         self.central_widget = QWidget(self)
@@ -28,16 +28,29 @@ class VideoPlayer(QMainWindow):
 
         self.last_positions = self.load_positions()
         self.current_file = ""
+        self.is_audio = False
+        self.is_closing = False
+        self.show_remaining_time = False
 
     def init_ui(self):
         main_layout = QVBoxLayout()
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(11, 11, 11, 11)
 
         # Video display area
         self.video_widget = QVideoWidget()
         main_layout.addWidget(self.video_widget)
 
+        # Audio label
+        self.audio_label = QLabel("Audio Playback")
+        self.audio_label.setAlignment(Qt.AlignCenter)
+        self.audio_label.setStyleSheet("font-size: 26px; color: #888;")
+        self.audio_label.setVisible(False)
+        main_layout.addWidget(self.audio_label)
+
         # Progress slider
         self.progress_slider = QSlider(Qt.Horizontal)
+        self.progress_slider.setFixedHeight(17)
         self.progress_slider.sliderMoved.connect(self.set_position)
         main_layout.addWidget(self.progress_slider)
 
@@ -48,12 +61,13 @@ class VideoPlayer(QMainWindow):
 
         self.current_time_label = QLabel("00:00:00")
         self.total_time_label = QLabel("00:00:00")
+        self.total_time_label.mousePressEvent = self.toggle_time_display
 
         label_style = """
             QLabel {
-                font-size: 10px;
-                min-height: 15px;
-                max-height: 15px;
+                font-size: 11px;
+                min-height: 13px;
+                max-height: 13px;
             }
         """
         self.current_time_label.setStyleSheet(label_style)
@@ -65,24 +79,20 @@ class VideoPlayer(QMainWindow):
 
         time_container = QWidget()
         time_container.setLayout(time_layout)
-        time_container.setFixedHeight(15)
+        time_container.setFixedHeight(17)
 
         main_layout.addWidget(time_container)
 
-        # Combined control layout
+        # Control buttons
         control_layout = QHBoxLayout()
         control_layout.setContentsMargins(0, 0, 0, 0)
-        control_layout.setSpacing(10)
-
-        # Play controls
-        play_control_layout = QHBoxLayout()
-        play_control_layout.setSpacing(5)
+        control_layout.setSpacing(11)
 
         button_style = """
             QPushButton {
-                min-height: 20px;
-                max-height: 20px;
-                padding: 0px 10px;
+                min-height: 22px;
+                max-height: 22px;
+                padding: 0px 11px;
             }
         """
 
@@ -102,52 +112,72 @@ class VideoPlayer(QMainWindow):
         self.stop_button.clicked.connect(self.stop_video)
         self.stop_button.setStyleSheet(button_style)
 
-        play_control_layout.addWidget(self.backward_button)
-        play_control_layout.addWidget(self.play_button)
-        play_control_layout.addWidget(self.forward_button)
-        play_control_layout.addWidget(self.stop_button)
+        control_layout.addWidget(self.backward_button)
+        control_layout.addWidget(self.play_button)
+        control_layout.addWidget(self.forward_button)
+        control_layout.addWidget(self.stop_button)
 
-        control_layout.addLayout(play_control_layout)
+        # Volume and Speed controls
+        volume_speed_layout = QHBoxLayout()
+        volume_speed_layout.setContentsMargins(0, 0, 0, 0)
+        volume_speed_layout.setSpacing(11)
 
         # Volume control
         volume_layout = QHBoxLayout()
+        volume_layout.setSpacing(5)
+        volume_label = QLabel("Volume:")
+        volume_label.setFixedWidth(50)
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(50)
-        self.volume_slider.setFixedWidth(100)
+        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.setFixedHeight(17)
         self.volume_slider.valueChanged.connect(self.set_volume)
-        volume_layout.addWidget(QLabel("Volume:"))
+        
+        self.volume_value_label = QLabel("50%")
+        self.volume_value_label.setFixedWidth(35)
+        
+        volume_layout.addWidget(volume_label)
         volume_layout.addWidget(self.volume_slider)
-        control_layout.addLayout(volume_layout)
+        volume_layout.addWidget(self.volume_value_label)
+
+        volume_speed_layout.addLayout(volume_layout)
 
         # Playback speed control
         speed_layout = QHBoxLayout()
+        speed_layout.setSpacing(5)
+        speed_label = QLabel("Speed:")
+        speed_label.setFixedWidth(50)
         self.speed_combo = QComboBox()
+        self.speed_combo.setFixedHeight(22)
+        self.speed_combo.setFixedWidth(70)
         speeds = ["0.5x", "0.75x", "0.85x", "1.0x", "1.25x", "1.5x", "1.75x", "2.0x"]
         self.speed_combo.addItems(speeds)
-        self.speed_combo.setCurrentText("1.0x")  # Set default speed
+        self.speed_combo.setCurrentText("1.0x")
         self.speed_combo.currentTextChanged.connect(self.set_playback_speed)
-        speed_layout.addWidget(QLabel("Speed:"))
+        
+        speed_layout.addWidget(speed_label)
         speed_layout.addWidget(self.speed_combo)
-        control_layout.addLayout(speed_layout)
+        
+        volume_speed_layout.addLayout(speed_layout)
+        volume_speed_layout.addStretch(1)
+
+        control_layout.addLayout(volume_speed_layout)
 
         main_layout.addLayout(control_layout)
 
         self.central_widget.setLayout(main_layout)
 
     def create_menu(self):
-        # Create menubar
         menubar = self.menuBar()
         file_menu = menubar.addMenu('File')
 
-        # Open action
         open_action = QAction(QIcon.fromTheme("document-open"), 'Open', self)
         open_action.setShortcut('Ctrl+O')
-        open_action.setStatusTip('Open movie')
+        open_action.setStatusTip('Open media file')
         open_action.triggered.connect(self.open_file)
         file_menu.addAction(open_action)
 
-        # Exit action
         exit_action = QAction(QIcon.fromTheme("application-exit"), 'Exit', self)
         exit_action.setShortcut('Ctrl+Q')
         exit_action.setStatusTip('Exit application')
@@ -166,20 +196,16 @@ class VideoPlayer(QMainWindow):
             json.dump(self.last_positions, f)
 
     def open_file(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Open Movie", "", "MP4 files (*.mp4)")
+        file_name, _ = QFileDialog.getOpenFileName(self, "Open Media File", "", 
+            "Media Files (*.mp3 *.mp4 *.avi *.mkv *.wav *.flac *.m4a);;All Files (*)")
         if file_name:
             self.current_file = file_name
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(file_name)))
             self.play_button.setEnabled(True)
             
-            # Check if there's a saved position for this file
             if file_name in self.last_positions:
                 position = self.last_positions[file_name]
-                reply = QMessageBox.question(self, 'Resume Playback', 
-                                             'Do you want to resume from where you left off?',
-                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                if reply == QMessageBox.Yes:
-                    self.media_player.setPosition(position)
+                self.media_player.setPosition(position)
             
             self.play_pause_video()
 
@@ -188,20 +214,40 @@ class VideoPlayer(QMainWindow):
             self.media_player.pause()
         else:
             self.media_player.play()
+        
+        self.is_audio = self.media_player.isAudioAvailable() and not self.media_player.isVideoAvailable()
+        self.video_widget.setVisible(not self.is_audio)
+        self.audio_label.setVisible(self.is_audio)
 
     def stop_video(self):
         self.media_player.stop()
-        # Save the current position when stopping
         if self.current_file:
             self.last_positions[self.current_file] = self.media_player.position()
             self.save_positions()
 
     def closeEvent(self, event):
-        # Save the current position when closing the application
-        if self.current_file:
-            self.last_positions[self.current_file] = self.media_player.position()
-            self.save_positions()
-        event.accept()
+        if not self.is_closing:
+            self.is_closing = True
+            event.ignore()
+            QTimer.singleShot(0, self.safe_close)
+        else:
+            event.accept()
+
+    def safe_close(self):
+        try:
+            if self.media_player.state() == QMediaPlayer.PlayingState:
+                self.media_player.stop()
+
+            if self.current_file:
+                self.last_positions[self.current_file] = self.media_player.position()
+                self.save_positions()
+
+            self.media_player.setMedia(QMediaContent())
+            
+            self.close()
+        except Exception as e:
+            print(f"Error during closing: {e}")
+            self.close()
 
     def media_state_changed(self, state):
         if self.media_player.state() == QMediaPlayer.PlayingState:
@@ -222,14 +268,28 @@ class VideoPlayer(QMainWindow):
 
     def set_volume(self, volume):
         self.media_player.setVolume(volume)
+        self.volume_value_label.setText(f"{volume}%")
 
     def update_current_time(self, position):
         current_time = QTime(0, 0, 0).addMSecs(position)
         self.current_time_label.setText(current_time.toString("hh:mm:ss"))
+        
+        if self.show_remaining_time:
+            remaining = self.media_player.duration() - position
+            remaining_time = QTime(0, 0, 0).addMSecs(remaining)
+            self.total_time_label.setText("-" + remaining_time.toString("hh:mm:ss"))
 
     def update_total_time(self, duration):
         total_time = QTime(0, 0, 0).addMSecs(duration)
-        self.total_time_label.setText(total_time.toString("hh:mm:ss"))
+        if self.show_remaining_time:
+            self.total_time_label.setText("-" + total_time.toString("hh:mm:ss"))
+        else:
+            self.total_time_label.setText(total_time.toString("hh:mm:ss"))
+
+    def toggle_time_display(self, event):
+        self.show_remaining_time = not self.show_remaining_time
+        self.update_total_time(self.media_player.duration())
+        self.update_current_time(self.media_player.position())
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Left:
@@ -238,18 +298,29 @@ class VideoPlayer(QMainWindow):
             self.forward()
         elif event.key() == Qt.Key_Space:
             self.play_pause_video()
+        elif event.key() == Qt.Key_Up:
+            self.adjust_volume(5)
+        elif event.key() == Qt.Key_Down:
+            self.adjust_volume(-5)
         else:
             super().keyPressEvent(event)
 
     def backward(self):
-        self.media_player.setPosition(max(0, self.media_player.position() - 1000))
+        self.media_player.setPosition(max(0, self.media_player.position() - 2000))
 
     def forward(self):
-        self.media_player.setPosition(min(self.media_player.duration(), self.media_player.position() + 1000))
+        self.media_player.setPosition(min(self.media_player.duration(), self.media_player.position() + 2000))
 
     def set_playback_speed(self, speed_text):
-        speed = float(speed_text[:-1])  # Remove 'x' and convert to float
+        speed = float(speed_text[:-1])
         self.media_player.setPlaybackRate(speed)
+
+    def adjust_volume(self, delta):
+        current_volume = self.media_player.volume()
+        new_volume = max(0, min(100, current_volume + delta))
+        self.media_player.setVolume(new_volume)
+        self.volume_slider.setValue(new_volume)
+        self.volume_value_label.setText(f"{new_volume}%")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
